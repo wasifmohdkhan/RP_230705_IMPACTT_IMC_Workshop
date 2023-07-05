@@ -1,0 +1,232 @@
+---
+title: "Untitled"
+output: html_document
+date: "2023-07-05"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+```{bash}
+conda activate qiime2-2023.2
+```
+
+# 1. Build tree with SEPP QIIME 2 plugin
+```{bash}
+cp ~/CourseData/MIC_data/16S_data/asvs-tree.qza .
+cp ~/CourseData/MIC_data/16S_data/insertion-placements.qza .
+```
+
+
+```{bash}
+# DONOT RUN THIS COMMAND
+
+qiime fragment-insertion sepp \
+    --i-representative-sequences deblur_output/rep_seqs_final.qza \
+    --i-reference-database /home/shared/microbiome_amplicon/sepp-refs-gg-13-8.qza \
+    --o-tree asvs-tree.qza \
+    --o-placements insertion-placements.qza \
+    --p-threads 4
+```
+
+# 2. Generate rarefaction curves
+```{bash}
+qiime diversity alpha-rarefaction \
+    --i-table deblur_output/deblur_table_final.qza \
+    --p-max-depth 11536 \
+    --p-steps 20 \
+    --i-phylogeny asvs-tree.qza \
+    --o-visualization rarefaction_curves.qzv
+```
+Question 1: What is a good rarefaction depth for diversity analysis?
+1000
+
+```{bash}
+```
+
+# 3. Calculating diversity metrics and generating ordination plots
+
+```{bash}
+qiime diversity core-metrics-phylogenetic \
+    --i-table deblur_output/deblur_table_final.qza \
+    --i-phylogeny asvs-tree.qza \
+    --p-sampling-depth 4000  \
+    --m-metadata-file Blueberry_metadata_reduced.tsv \
+    --p-n-jobs-or-threads 4 \
+    --output-dir diversity
+```
+
+# Alpha diversity visualization and significance test
+```{bash}
+qiime diversity alpha-group-significance \
+    --i-alpha-diversity diversity/shannon_vector.qza \
+    --m-metadata-file Blueberry_metadata_reduced.tsv \
+    --o-visualization diversity/shannon_compare_groups.qzv
+```
+
+Question 2: are there any significant differences in alpha diversity between any of our metadata categories?
+NO
+
+Question 3: which metadata category appears to provide more separation in the beta diversity PCoA plots?
+Description_3
+
+# Beta diversity visualization and significance test
+```{bash}
+qiime diversity beta-group-significance \
+    --i-distance-matrix diversity/bray_curtis_distance_matrix.qza \
+    --m-metadata-file Blueberry_metadata_reduced.tsv \
+    --m-metadata-column Description_3 \
+    --o-visualization beta_group_sig_permanova
+```
+
+
+```{bash}
+qiime diversity beta-group-significance \
+    --i-distance-matrix diversity/bray_curtis_distance_matrix.qza \
+    --m-metadata-file Blueberry_metadata_reduced.tsv \
+    --m-metadata-column Description_3 \
+    --o-visualization beta_group_sig_permdisp \
+    --p-method "permdisp"
+```
+
+# 4. Generate stacked bar chart of taxa relative abundances
+```{bash}
+qiime taxa barplot \
+    --i-table deblur_output/deblur_table_final.qza \
+    --i-taxonomy taxa/classification.qza \
+    --m-metadata-file Blueberry_metadata_reduced.tsv \
+    --o-visualization taxa/taxa_barplot.qzv
+```
+Question 4: can you identify any patterns between the metadata groups?
+
+# 5. Identifying differentially abundant features with ANCOM
+```{bash}
+qiime composition add-pseudocount \
+    --i-table deblur_output/deblur_table_final.qza \
+    --p-pseudocount 1 \
+    --o-composition-table deblur_output/deblur_table_final_pseudocount.qza
+```
+#
+
+```{bash}
+qiime composition ancom \
+    --i-table deblur_output/deblur_table_final_pseudocount.qza \
+    --m-metadata-file Blueberry_metadata_reduced.tsv \
+    --m-metadata-column Description_3 \
+    --output-dir ancom_output
+```
+Question 5: Does ANCOM identify any differentially abundant taxa between any of the metadata groups? If so, which one(s)?
+
+```{bash}
+```
+
+
+```{bash}
+```
+
+
+```{bash}
+```
+
+
+```{bash}
+```
+
+
+```{bash}
+```
+
+
+```{bash}
+```
+
+
+```{bash}
+```
+
+
+```{bash}
+```
+
+
+```{bash}
+```
+
+
+```{bash}
+```
+
+
+```{bash}
+```
+
+
+```{bash}
+```
+
+
+```{bash}
+```
+
+
+```{bash}
+```
+
+
+```{bash}
+```
+
+
+```{bash}
+```
+
+
+```{bash}
+```
+
+
+```{bash}
+```
+
+
+```{bash}
+```
+
+
+```{bash}
+```
+
+
+```{bash}
+```
+
+
+```{bash}
+```
+
+
+```{bash}
+```
+
+
+```{bash}
+```
+
+
+```{bash}
+```
+
+
+```{bash}
+```
+
+
+```{bash}
+```
+
+
+```{bash}
+```
+
