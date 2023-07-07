@@ -1,0 +1,373 @@
+---
+title: "Untitled"
+output: html_document
+date: "2023-07-06"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+```{bash}
+cd ~
+cd workspace/
+mkdir metagenome_workshop
+cd metagenome_workshop/
+ln -s ~/CourseData/MIC_data/metagenome_data/cat_reads/ .
+```
+
+
+```{bash}
+less cat_reads/BB190.fastq
+head cat_reads/BB190.fastq
+```
+
+
+```{bash}
+conda activate taxonomic
+```
+
+
+```{bash}
+mkdir kraken2_kreport
+mkdir kraken2_outraw
+```
+
+
+```{bash}
+parallel -j 1 --eta --dry-run 'kraken2 --db  ~/CourseData/MIC_data/metagenome_data/k2_pluspf_08gb_20230314/ --threads 4 --output kraken2_outraw/{1/.}_{2}_minikraken.kraken.txt --report kraken2_kreport/{1/.}_{2}_minikraken.kreport --use-names {1} --confidence {2}' ::: cat_reads/*.fastq ::: 0.0 0.1
+
+```
+
+```{r}
+# Computer:jobs running/jobs completed/%of started jobs/Average seconds to complete
+# ETA: 0s Left: 23 AVG: 0.00s  local:1/1/100%/0.0s kraken2 --db  ~/CourseData/MIC_data/metagenome_data/k2_pluspf_08gb_20230314/ --threads 4 --output kraken2_outraw/BB190_0.1_minikraken.kraken.txt --report kraken2_kreport/BB190_0.1_minikraken.kreport --use-names cat_reads/BB190.fastq --confidence 0.1
+# ETA: 0s Left: 22 AVG: 0.00s  local:1/2/100%/0.0s kraken2 --db  ~/CourseData/MIC_data/metagenome_data/k2_pluspf_08gb_20230314/ --threads 4 --output kraken2_outraw/BB191_0.0_minikraken.kraken.txt --report kraken2_kreport/BB191_0.0_minikraken.kreport --use-names cat_reads/BB191.fastq --confidence 0.0
+# ETA: 0s Left: 21 AVG: 0.00s  local:1/3/100%/0.0s kraken2 --db  ~/CourseData/MIC_data/metagenome_data/k2_pluspf_08gb_20230314/ --threads 4 --output kraken2_outraw/BB191_0.1_minikraken.kraken.txt --report kraken2_kreport/BB191_0.1_minikraken.kreport --use-names cat_reads/BB191.fastq --confidence 0.1
+# ETA: 0s Left: 20 AVG: 0.00s  local:1/4/100%/0.0s kraken2 --db  ~/CourseData/MIC_data/metagenome_data/k2_pluspf_08gb_20230314/ --threads 4 --output kraken2_outraw/BB192_0.0_minikraken.kraken.txt --report kraken2_kreport/BB192_0.0_minikraken.kreport --use-names cat_reads/BB192.fastq --confidence 0.0
+```
+
+# Back to the Kraken2 output
+
+
+```{bash}
+head -30 kraken2_kreport/BB190_0.0_minikraken.kreport
+```
+
+
+```{bash}
+head -30 ~/CourseData/MIC_data/metagenome_data/kraken2_kreport/BB190_0.0_RefSeqV214.kreport
+head -30 ~/CourseData/MIC_data/metagenome_data/kraken2_kreport/BB190_0.1_RefSeqV214.kreport
+head -30 kraken2_kreport/BB190_0.1_minikraken.kreport
+```
+Question 1: How many more reads are classified using the full database than with the mini database?
+60% vs 97%
+Question 2: What do you notice about the number, or proportion, of reads that have been classified?
+
+Question 3: What do you notice now about the number of reads that have been classified? Does this seem like an appropriate confidence threshold to use?
+99.94
+NO
+
+# Running Bracken
+```{bash}
+conda activate bracken
+mkdir bracken_out
+```
+
+
+```{bash}
+parallel -j 2 'bracken -d ~/CourseData/MIC_data/metagenome_data/k2_pluspf_08gb_20230314/ -i {} -o bracken_out/{/.}.species.bracken -r 100 -l S -t 1' ::: kraken2_kreport/*minikraken.kreport
+
+```
+
+```{r}
+# >> python src/est_abundance.py -i kraken2_kreport/BB190_0.1_minikraken.kreport -o bracken_out/BB190_0.1_minikraken.species.bracken -k /home/ubuntu/CourseData/MIC_data/metagenome_data/k2_pluspf_08gb_20230314/database100mers.kmer_distrib -l S -t 1
+```
+
+
+```{bash}
+mkdir bracken_out_merged
+combine_bracken_outputs.py --files bracken_out/*minikraken.species.bracken -o bracken_out_merged/merged_output_minikraken.species.bracken
+```
+
+
+```{bash}
+conda deactivate
+conda activate taxonomic
+```
+
+
+```{bash}
+less bracken_out_merged/merged_output_minikraken.species.bracken
+```
+
+
+```{bash}
+ln -s ~/CourseData/MIC_data/metagenome_data/bracken_out_merged/merged_output_RefSeq.species.bracken bracken_out_merged/
+ln -s ~/CourseData/MIC_data/metagenome_data/combine_merged_files.py .
+ln -s ~/CourseData/MIC_data/metagenome_data/Blueberry_metadata_metagenome.tsv .
+```
+
+
+```{bash}
+python combine_merged_files.py
+```
+
+
+```{bash}
+head ~/CourseData/MIC_data/metagenome_data/tax_file_species.csv
+```
+
+# Visualising the results using Phyloseq in R
+
+```{r}
+library(phyloseq)
+library(vegan)
+library(ggplot2)
+library(randomcoloR)
+library(gridExtra)
+library(tidyr)
+```
+```{r}
+metadata = read.csv('/home/ubuntu/workspace/metagenome_workshop/Blueberry_metadata_metagenome.tsv', sep='\t')
+rownames(metadata) = metadata$SampleID
+metadata = metadata[,-1]
+metadata
+```
+```{r}
+bracken = read.csv('/home/ubuntu/workspace/metagenome_workshop/bracken_out_merged/bracken_combined.csv')
+bracken = as.data.frame(bracken)
+row.names(bracken) = bracken$name
+bracken
+```
+
+# Next we’ll read in the bracken output. We’ll then separate out the column in this file that contains taxonomy information from the columns containing information about the abundance of each species in our samples 
+```{r}
+taxonomy = bracken[, c(1,50)]
+row.names(taxonomy) = row.names(bracken)
+taxonomy
+```
+```{r}
+table_num = data.matrix(bracken[,2:49])
+rownames(table_num) = bracken[,1]
+bracken_2 = as.matrix(table_num)
+bracken_2
+```
+
+```{r}
+taxonomy <- separate(data = taxonomy, col = Taxonomy, into = c("Domain", "Phylum", "Class", "Order", "Family", "Genus", "Species"), sep = "\\;")
+taxmat <- taxonomy[,-1]
+taxonomy = tax_table(taxmat)
+taxa_names(taxonomy) <- rownames(taxmat)
+taxonomy
+```
+
+# Now we’ll convert the bracken output, metadata and taxonomy information to a phyloseq object:
+```{r}
+physeq = phyloseq(otu_table(bracken_2, taxa_are_rows = TRUE), sample_data(metadata), taxonomy)
+physeq
+```
+# First we’ll take a look at the number of sequences within each sample have been classified using the different database and confidence threshold options:
+```{r}
+sums = as.data.frame(sample_sums(physeq))
+sums[,'Database'] = sample_data(physeq)$Database
+sums[,'Confidence.Threshold'] = sample_data(physeq)$Confidence.Threshold
+colnames(sums) = c('Sum', 'Database', 'Confidence.Threshold')
+sums$Confidence.Threshold <- as.factor(sums$Confidence.Threshold)
+ggplot(sums, aes(x=Confidence.Threshold, y=Sum, fill=Database)) +
+  geom_boxplot() + scale_y_log10() +
+  labs(y= "Number of reads classified", x = "Confidence Threshold")
+```
+Question 4: How many reads are classified with each of the database/confidence threshold combinations? Which would you choose based on this?
+confidence Threshold 0 with RefSeq
+
+# Now we’ll just reduce the phyloseq object to look at the full database and we’ll also perform the normalisations that we will want to use:
+
+```{r}
+db = "RefSeqV214"
+conf = 0.1
+physeq_red <- prune_samples(sample_data(physeq)$Database == db, physeq) #keep only samples where the database is "RefSeqV214"
+physeq_red <- prune_samples(sample_data(physeq_red)$Confidence.Threshold == conf, physeq_red) #keep only samples where the confidence threshold is 0.1
+physeq_rare <- rarefy_even_depth(physeq_red, sample.size = min(sample_sums(physeq_red)), replace = TRUE, trimOTUs = TRUE, verbose = TRUE) #rarefy to the lowest sample depth
+physeq_relabun  <- transform_sample_counts(physeq_red, function(x) (x / sum(x))*100) #convert to relative abundance
+```
+```{r}
+physeq_relabun
+```
+```{r}
+palette = distinctColorPalette(30)
+rnk = "ta1"
+ps.rank = tax_glom(physeq_relabun, taxrank=rnk, NArm=FALSE)
+
+plot_bar(ps.rank, fill=rnk) +
+  facet_wrap(c(~Description_1, ~Description_3), scales="free_x", nrow=1) +
+  theme(legend.text=element_text(size=5), legend.key.size = unit(0.3, "cm")) +
+  guides(fill=guide_legend(ncol=1)) +
+  scale_fill_manual(values=palette)
+```
+Question 5: Here you should see that there are also Eukaryotes in your samples. What do you notice about the distribution of the Eukaryotes in different samples?
+There are more Eukaryotes in Rhizoshpere
+
+# Phylum
+## Now we’ll look at the phylum level:
+```{r}
+palette = distinctColorPalette(30)
+rnk = "ta2"
+ps.rank = tax_glom(physeq_relabun, taxrank=rnk, NArm=FALSE)
+rank.sum = tapply(taxa_sums(ps.rank), tax_table(ps.rank)[, rnk], sum, na.rm=TRUE)
+top30 = names(sort(rank.sum, TRUE))[1:30]
+ps.rank = prune_taxa((tax_table(ps.rank)[, rnk] %in% top30), ps.rank)
+
+plot_bar(ps.rank, fill=rnk) + facet_wrap(c(~Description_1, ~Description_3), scales="free_x", nrow=1) + theme(legend.text=element_text(size=5), legend.key.size = unit(0.3, "cm")) + guides(fill=guide_legend(ncol=1)) + scale_fill_manual(values=palette)
+```
+Question 6: Can you modify this phylum level code to work at a lower rank? 
+```{r}
+palette = distinctColorPalette(30)
+rnk = "ta6"
+ps.rank = tax_glom(physeq_relabun, taxrank=rnk, NArm=FALSE)
+rank.sum = tapply(taxa_sums(ps.rank), tax_table(ps.rank)[, rnk], sum, na.rm=TRUE)
+top30 = names(sort(rank.sum, TRUE))[1:30]
+ps.rank = prune_taxa((tax_table(ps.rank)[, rnk] %in% top30), ps.rank)
+
+plot_bar(ps.rank, fill=rnk) + facet_wrap(c(~Description_1, ~Description_3), scales="free_x", nrow=1) + theme(legend.text=element_text(size=5), legend.key.size = unit(0.3, "cm")) + guides(fill=guide_legend(ncol=1)) + scale_fill_manual(values=palette)
+```
+
+Question 7: Why do we not usually have a phylogenetic tree for read-based metagenomic analyses?
+because the reads might be from different parts of the genome and may not overlap at all
+# Alpha diversity
+```{r}
+plot_richness(physeq_rare, measures=c("Observed", "Chao1", "Simpson", "Shannon"))
+```
+
+# Per group (bulk vs rhizosphere):
+```{r}
+plot_richness(physeq_rare, x="Description_1", measures=c("Observed", "Chao1", "Simpson", "Shannon")) + geom_boxplot()
+
+```
+
+# Per group (forest vs managed):
+
+```{r}
+plot_richness(physeq_rare, x="Description_3", measures=c("Observed", "Chao1", "Simpson", "Shannon")) + geom_boxplot()
+
+```
+Question 8: What patterns do you notice with the alpha diversity between groups?
+
+# Beta diversity ordination plots
+Bray-Curtis dissimilarity:
+```{r}
+ps = physeq_rare
+ps.ord <- ordinate(ps, "PCoA", "bray")
+plot_ordination(ps, ps.ord, type="samples", color="Description_1", shape="Description_3")
+distance <- phyloseq::distance(ps, method="bray", weighted=F)
+adonis2(distance ~ sample_data(ps)$Description_1*sample_data(ps)$Description_3) %>% broom::tidy()
+```
+
+
+Question 9: What can you tell about the samples from how they group on the PCoA plots? Does this agree with the results of the PERMANOVA tests?
+
+# Jaccard distance:
+```{r}
+ps = physeq_rare
+ps.ord <- ordinate(ps, "PCoA", "jaccard")
+plot_ordination(ps, ps.ord, type="samples", color="Description_1", shape="Description_3")
+distance <- phyloseq::distance(ps, method="jaccard", weighted=F)
+adonis2(distance ~ sample_data(ps)$Description_1*sample_data(ps)$Description_3) %>% broom::tidy()
+```
+Functional annotation introduction
+1. Determining functional profiles using MMseqs2
+```{bash}
+cd ~
+cd workspace/metagenome_workshop
+conda activate functional
+```
+#The first step will be running a command creates an MMSeqs database from the the input fastq files. The creation of this database is necessary for MMSeqs as it vastly increases the speed at which translated DNA sequences can be mapped against a protein database:
+```{bash}
+mkdir mmseqs_U90_out
+parallel -j 4 --progress 'mmseqs createdb {} mmseqs_U90_out/mmseqs-{/.}queryDB' ::: cat_reads/*
+```
+
+#This command is the real meat of the job file and runs the freshly created sample database against the provided UniRef90 protien database:
+```{bash}
+parallel -j 1 --dry-run 'mmseqs search mmseqs_U90_out/mmseqs-{/.}queryDB ~/CourseData/MIC_data/metagenome_data/MMSeqs2_db/mmseqsUniref90DB mmseqs_U90_out/mmseqs-{/.}resultDB tmp --db-load-mode 3 --threads 4 --max-seqs 25 -s 1 -a -e 1e-5 > /dev/null 2>&1' ::: cat_reads/*
+
+```
+
+```{r}
+# mmseqs search mmseqs_U90_out/mmseqs-BB190queryDB ~/CourseData/MIC_data/metagenome_data/MMSeqs2_db/mmseqsUniref90DB mmseqs_U90_out/mmseqs-BB190resultDB tmp --db-load-mode 3 --threads 4 --max-seqs 25 -s 1 -a -e 1e-5 > /dev/null 2>&1
+# mmseqs search mmseqs_U90_out/mmseqs-BB191queryDB ~/CourseData/MIC_data/metagenome_data/MMSeqs2_db/mmseqsUniref90DB mmseqs_U90_out/mmseqs-BB191resultDB tmp --db-load-mode 3 --threads 4 --max-seqs 25 -s 1 -a -e 1e-5 > /dev/null 2>&1
+```
+
+#The final command allows us to convert the resulting file from the MMSeqs2 format into one that is more usable:
+
+```{bash}
+parallel -j 1 --dry-run 'mmseqs convertalis mmseqs_U90_out/mmseqs-{/.}queryDB MMSeqs2_db/mmseqsUniref90DB mmseqs_U90_out/mmseqs-{/.}resultDB mmseqs_U90_out/mmseqs-{/.}-s1.m8 --db-load-mode 2 > /dev/null 2>&1' ::: cat_reads/*
+
+```
+
+```{r}
+# mmseqs convertalis mmseqs_U90_out/mmseqs-BB190queryDB MMSeqs2_db/mmseqsUniref90DB mmseqs_U90_out/mmseqs-BB190resultDB mmseqs_U90_out/mmseqs-BB190-s1.m8 --db-load-mode 2 > /dev/null 2>&1
+# mmseqs convertalis mmseqs_U90_out/mmseqs-BB191queryDB MMSeqs2_db/mmseqsUniref90DB mmseqs_U90_out/mmseqs-BB191resultDB mmseqs_U90_out/mmseqs-BB191-s1.m8 --db-load-mode 2 > /dev/null 2>&1
+```
+
+# Now we’ll get the results that would have been created from these steps. We’ll create a new folder for the .m8 files and create a link to them:
+
+```{bash}
+mkdir mmseqs_m8_files
+ln -s ~/CourseData/MIC_data/metagenome_data/mmseqs_U90_out/*.m8 mmseqs_m8_files/
+```
+
+# Lets take a quick look at one of the files we just moved into the directory mmseqs_m8_files using the less command.
+```{bash}
+less mmseqs_m8_files/mmseqs-BB209-s1.m8
+
+```
+
+Question 1: How many protein sequences did the sequence SRR8742630.234641 align with in the sample BB198? Which alignment/alignments have the lowest E-value/highest bitscore?
+
+# The next step we need to take is to get the name of the protein sequence that had the best alignment for each sequence read in our samples. We can achieve this by running the command:
+```{bash}
+mkdir mmseqs_U90_out_tophit
+cp -r ~/CourseData/MIC_data/metagenome_data/Functional_Helper_Scripts/ .
+python Functional_Helper_Scripts/pick_uniref_top_hit.py --unirefm8Dir mmseqs_m8_files --output_path mmseqs_U90_out_tophit
+```
+
+
+```{bash}
+cp ~/CourseData/MIC_data/metagenome_data/multi-sample-outfiles-w-m8.txt .
+```
+
+
+```{bash}
+```
+
+
+```{bash}
+```
+
+
+```{bash}
+```
+
+
+```{bash}
+```
+
+
+```{bash}
+```
+
+
+```{bash}
+```
+
+
+```{bash}
+```
+
+
+```{bash}
+```
+

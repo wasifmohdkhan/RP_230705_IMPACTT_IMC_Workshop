@@ -1,0 +1,267 @@
+---
+title: "Untitled"
+output: html_document
+date: "2023-07-06"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+```{bash}
+mkdir -p /home/ubuntu/workspace/mags_workshop
+ln -s /home/ubuntu/CourseData/MIC_data/mags_workshop/module5 /home/ubuntu/workspace/mags_workshop
+cd /home/ubuntu/workspace/mags_workshop/module5
+```
+
+
+```{bash}
+conda activate spades_env
+```
+
+## Do not run metaspades
+```{bash}
+# metaspades.py -k 21,33,55,77,99,127 -t 28 -m 50 -o metagenome_assemblies/KGHS_1-0 -1 cleaned_fastq_files/KGHS_1-0_1.fastq -2 cleaned_fastq_files/KGHS_1-0_2.fastq
+```
+
+contigs.fasta
+```{bash}
+less /home/ubuntu/workspace/mags_workshop/module5/output/metagenome_assemblies/KGHS_1-0/contigs.fasta
+```
+
+scaffolds.fasta
+```{bash}
+less /home/ubuntu/workspace/mags_workshop/module5/output/metagenome_assemblies/KGHS_1-0/scaffolds.fasta
+```
+
+spades.log
+```{bash}
+less /home/ubuntu/workspace/mags_workshop/module5/output/metagenome_assemblies/KGHS_1-0/spades.log
+```
+
+# QUAST (https://github.com/ablab/quast)
+# Activate the QUAST conda environment.
+```{bash}
+conda activate quast_env
+```
+
+# Run QUAST on the contigs.fasta file.
+
+```{bash}
+quast.py --output-dir metagenome_assemblies/KGHS_1-0/quast_contigs --threads 1 output/metagenome_assemblies/KGHS_1-0/contigs.fasta
+```
+
+# Run QUAST on the scaffolds.fasta file.
+```{bash}
+quast.py --output-dir metagenome_assemblies/KGHS_1-0/quast_scaffolds --threads 1 output/metagenome_assemblies/KGHS_1-0/scaffolds.fasta
+```
+
+
+```{bash}
+less /home/ubuntu/workspace/mags_workshop/module5/metagenome_assemblies/KGHS_1-0/quast_scaffolds/transposed_report.tsv
+```
+
+# Change the directory back to the module5 directory.
+
+```{bash}
+cd /home/ubuntu/workspace/mags_workshop/module5
+```
+
+
+```{bash}
+# Create the seqkit conda environment.
+
+conda create --name seqkit_env
+
+# Install the seqkit conda package.
+
+conda install -c bioconda seqkit
+```
+
+
+```{bash}
+mkdir -p filtered_metagenomes/KGHS_1-0
+# Filter scaffolds to a minimum length of 1500 nt.
+
+seqkit seq -m 1500 output/metagenome_assemblies/KGHS_1-0/scaffolds.fasta > filtered_metagenomes/KGHS_1-0/KGHS_1-0_min1500.fasta
+```
+
+
+```{bash}
+# Run seqkit stats on the KGHS_1-0 contigs.fasta file.
+
+seqkit stats -a output/metagenome_assemblies/KGHS_1-0/contigs.fasta > metagenome_assemblies/KGHS_1-0/contigs.fasta.seqkit.stats.txt
+```
+
+
+```{bash}
+# Run seqkit stats on the KGHS_1-0 scaffolds.fasta file.
+
+seqkit stats -a output/metagenome_assemblies/KGHS_1-0/scaffolds.fasta > metagenome_assemblies/KGHS_1-0/scaffolds.fasta.seqkit.stats.txt
+```
+
+
+```{bash}
+# Run seqkit with the stats option on the length-filtered KGHS_1-0_min1500.fasta file to see how filtering affected the minimum length reported and the number of scaffolds.
+
+seqkit stats -a output/filtered_metagenomes/KGHS_1-0/KGHS_1-0_min1500.fasta > filtered_metagenomes/KGHS_1-0/KGHS_1-0_min1500.fasta.seqkit.stats.txt
+```
+
+# Section 2: Binning
+```{bash}
+# Activate the bwa conda environment.
+
+conda activate bwa_env
+
+# Create an index of the filtered scaffolds using bwa index.
+
+bwa index filtered_metagenomes/KGHS_1-0/KGHS_1-0_min1500.fasta
+
+# Map the paired end reads from sample KGHS_1-0 to the filtered scaffolds using bwa mem.
+
+bwa mem -t 4 filtered_metagenomes/KGHS_1-0/KGHS_1-0_min1500.fasta cleaned_fastq_files/KGHS_1-0_1.fastq cleaned_fastq_files/KGHS_1-0_2.fastq > filtered_metagenomes/KGHS_1-0/KGHS_1-0.sam
+```
+
+
+```{bash}
+# Activate the samtools conda environment.
+
+conda activate samtools_env
+
+# Sort the sam file and convert to bam using samtools.
+
+samtools sort -@ 4 -O BAM -o filtered_metagenomes/KGHS_1-0/KGHS_1-0.bam filtered_metagenomes/KGHS_1-0/KGHS_1-0.sam
+```
+
+
+```{bash}
+# Change the directory back to the module5 directory.
+
+cd /home/ubuntu/workspace/mags_workshop/module5
+
+# Activate the metabat2 conda environment.
+
+conda activate metabat2_env
+
+# Create the initial binning KGHS_1-0 output directory.
+
+mkdir -p initial_binning/KGHS_1-0/
+```
+
+
+```{bash}
+# Generate the metabat2 depth of coverage text file using the bam file generated in the mapping step.
+
+jgi_summarize_bam_contig_depths \
+--outputDepth initial_binning/KGHS_1-0/metabat2_depth.txt \
+output/filtered_metagenomes/KGHS_1-0/KGHS_1-0.bam
+```
+
+
+```{bash}
+# Create the initial binning working directory for metabat2.
+
+mkdir -p initial_binning/KGHS_1-0/working_dir/metabat2 
+
+# Run metabat2 on the filtered scaffolds using the metabat2 depth of coverage file.
+
+metabat2 -i output/filtered_metagenomes/KGHS_1-0/KGHS_1-0_min1500.fasta \
+-a initial_binning/KGHS_1-0/metabat2_depth.txt \
+-o initial_binning/KGHS_1-0/working_dir/metabat2/KGHS_1-0_bin \
+-m 1500 \
+-t 1 \
+–unbinned
+```
+
+
+```{bash}
+# Create the initial binning metabat2 directory for the KGHS_1-0 sample.
+
+mkdir -p initial_binning/KGHS_1-0/metabat2
+
+# Copy the metabat2 bins to the initial binning metabat2 directory.
+
+#cp initial_binning/KGHS_1-0/working_dir/metabat2/KGHS_1-0_bin.\[0-9\]\*.fa initial_binning/KGHS_1-0/metabat2 # not working
+cp -v initial_binning/KGHS_1-0/working_dir/metabat2/KGHS_1-0_bin.[0-9]*.fa initial_binning/KGHS_1-0/metabat2
+
+```
+
+# Bin length-filtered scaffolds using MaxBin2.
+```{bash}
+
+# Activate the metabat2 conda environment for running the jgi_summarize_bam_contig_depths program from the metabat2 software to generate the depth of coverage file for maxbin2.
+
+conda activate metabat2_env
+```
+
+
+```{bash}
+# Generate the maxbin2 depth of coverage text file using the bam file generated in the mapping step.
+
+jgi_summarize_bam_contig_depths \
+--outputDepth initial_binning/KGHS_1-0/KGHS_1-0_maxbin2_depth.txt \
+--noIntraDepthVariance output/filtered_metagenomes/KGHS_1-0/KGHS_1-0.bam
+```
+
+
+```{bash}
+# Create the maxbin2 abundance file using the first and third columns of the maxbin2 depth of coverage file.
+
+tail -n+2 initial_binning/KGHS_1-0/KGHS_1-0_maxbin2_depth.txt | cut -f1,3 > initial_binning/KGHS_1-0/KGHS_1-0_maxbin2_abund.txt
+```
+
+
+```{bash}
+# Print the path of the maxbin2 abundance file to a list file.
+
+echo initial_binning/KGHS_1-0/KGHS_1-0_maxbin2_abund.txt > initial_binning/KGHS_1-0/KGHS_1-0_maxbin2_abund_list.txt
+```
+
+
+```{bash}
+# Activate the maxbin2 conda environment.
+
+conda activate maxbin2_env
+
+# Create the working maxbin2 output directory.
+
+mkdir -p initial_binning/KGHS_1-0/working_dir/maxbin2
+```
+
+
+```{bash}
+# Run MaxBin2 using the filtered scaffolds fasta file and the maxbin2 abundance list.
+
+/home/ubuntu/.conda/envs/maxbin2_env/bin/perl /home/ubuntu/.conda/envs/maxbin2_env/bin/run_MaxBin.pl -contig output/filtered_metagenomes/KGHS_1-0/KGHS_1-0_min1500.fasta -markerset 107 -thread 14 -min_contig_length 1500 -out initial_binning/KGHS_1-0/working_dir/maxbin2/KGHS_1-0_bin -abund_list initial_binning/KGHS_1-0/KGHS_1-0_maxbin2_abund_list.txt
+```
+
+
+```{bash}
+```
+
+
+```{bash}
+```
+
+
+```{bash}
+```
+
+
+```{bash}
+```
+
+
+```{bash}
+```
+
+
+```{bash}
+```
+
+
+```{bash}
+```
+

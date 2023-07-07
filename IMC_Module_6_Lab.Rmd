@@ -1,0 +1,263 @@
+---
+title: "Untitled"
+output: html_document
+date: "2023-07-07"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+# Preliminaries
+Work directory
+Create a new directory that will store all of the files created in this lab.
+```{bash}
+mkdir metatranscriptomics
+cd metatranscriptomics/
+```
+
+# Python Scripts
+```{bash}
+wget https://github.com/ParkinsonLab/2017-Microbiome-Workshop/releases/download/CBW2023/precomputed_files_cbw_2023.tar.gz -O precomputed_files.tar.gz
+tar --wildcards -xvf precomputed_files.tar.gz *.py
+
+# Input files
+tar -xvf precomputed_files.tar.gz mouse1.fastq
+less mouse1.fastq
+```
+
+
+
+```{bash}
+fastqc mouse1.fastq
+```
+
+# Processing the Reads
+Step 1. Remove adapter sequences and trim low quality sequences.
+```{bash}
+tar -xvf precomputed_files.tar.gz TruSeq3-SE.fa > Adapters
+java \
+-jar /usr/local/trimmomatic-0.36.jar SE mouse1.fastq mouse1_trim.fastq \
+ILLUMINACLIP:Adapters:2:30:10 \
+LEADING:3 \
+TRAILING:3 \
+SLIDINGWINDOW:4:15 \
+MINLEN:50
+```
+
+
+```{bash}
+fastqc mouse1_trim.fastq
+```
+
+# Optional: Paired-end read merging
+
+```{bash}
+# Example only, do not run!
+# vsearch --fastq_mergepairs mouse1_trim.fastq --reverse mouse2_trim.fastq --fastqout mouse_merged_trim.fastq --fastqout_notmerged_fwd mouse1_merged_trim.fastq --fastqout_notmerged_rev mouse2_merged_trim.fastq
+
+# Also example only!
+# fastqc mouse_merged_trim.fastq
+```
+
+# Read quality filtering
+```{bash}
+vsearch --fastq_filter mouse1_trim.fastq --fastq_maxee 2.0 --fastqout mouse1_qual.fastq
+fastqc mouse1_qual.fastq
+```
+
+# Step 2. Remove duplicate reads
+```{bash}
+/usr/local/cd-hit-v4.8.1-2019-0228/cd-hit-auxtools/cd-hit-dup -i mouse1_qual.fastq -o mouse1_unique.fastq
+```
+
+# Step 3. Remove vector contamination
+```{bash}
+wget ftp://ftp.ncbi.nih.gov/pub/UniVec/UniVec_Core
+
+```
+
+# Now we must generate an index for these sequences for BWA and BLAT using the following commands:
+
+```{bash}
+bwa index -a bwtsw UniVec_Core
+samtools faidx UniVec_Core
+makeblastdb -in UniVec_Core -dbtype nucl
+```
+
+Next we can perform alignments for the reads with BWA and filter out any reads that align to our vector database with Samtools using the following commands:
+
+```{bash}
+bwa mem -t 4 UniVec_Core mouse1_unique.fastq > mouse1_univec_bwa.sam
+samtools view -bS mouse1_univec_bwa.sam > mouse1_univec_bwa.bam
+samtools fastq -n -F 4 -0 mouse1_univec_bwa_contaminats.fastq mouse1_univec_bwa.bam
+samtools fastq -n -f 4 -0 mouse1_univec_bwa.fastq mouse1_univec_bwa.bam
+```
+
+# Now we want to perform additional alignments for the reads with BLAT to filter out any remaining reads that align to our vector contamination database. However, BLAT only accepts fasta files so we have to convert our reads from fastq to fasta. This can be done using VSEARCH.
+```{bash}
+vsearch --fastq_filter mouse1_univec_bwa.fastq --fastaout mouse1_univec_bwa.fasta
+```
+
+
+```{bash}
+blat -noHead -minIdentity=90 -minScore=65  UniVec_Core mouse1_univec_bwa.fasta -fine -q=rna -t=dna -out=blast8 mouse1_univec.blatout
+
+```
+
+# Lastly, we can run a small python script to filter the reads that BLAT does not confidently align to any sequences from our vector contamination database.
+
+```{bash}
+pip install biopython
+python 1_BLAT_Filter.py \
+mouse1_univec_bwa.fastq \
+mouse1_univec.blatout \
+mouse1_univec_blat.fastq \
+mouse1_univec_blat_contaminats.fastq
+```
+
+# Step 4. Remove host reads
+```{bash}
+wget ftp://ftp.ensembl.org/pub/current_fasta/mus_musculus/cds/Mus_musculus.GRCm39.cds.all.fa.gz
+gzip -d Mus_musculus.GRCm39.cds.all.fa.gz
+mv Mus_musculus.GRCm39.cds.all.fa mouse_cds.fa
+```
+
+
+```{bash}
+bwa index -a bwtsw mouse_cds.fa
+samtools faidx mouse_cds.fa
+makeblastdb -in mouse_cds.fa -dbtype nucl
+```
+
+
+```{bash}
+bwa mem -t 4 mouse_cds.fa mouse1_univec_blat.fastq > mouse1_mouse_bwa.sam
+samtools view -bS mouse1_mouse_bwa.sam > mouse1_mouse_bwa.bam
+samtools fastq -n -F 4 -0 mouse1_mouse_bwa_contaminats.fastq mouse1_mouse_bwa.bam
+samtools fastq -n -f 4 -0 mouse1_mouse_bwa.fastq mouse1_mouse_bwa.bam
+```
+
+# Finally, we use BLAT to perform additional alignments for the reads against our host sequence database.
+
+```{bash}
+vsearch \
+--fastq_filter mouse1_mouse_bwa.fastq \
+--fastaout mouse1_mouse_bwa.fasta
+
+blat -noHead -minIdentity=90 -minScore=65  \
+mouse_cds.fa mouse1_mouse_bwa.fasta \
+-fine -q=rna -t=dna -out=blast8 mouse1_mouse.blatout
+
+python 1_BLAT_Filter.py \
+mouse1_mouse_bwa.fastq \
+mouse1_mouse.blatout \
+mouse1_mouse_blat.fastq \
+mouse1_mouse_blat_contaminats.fastq
+```
+
+# Step 5. Remove abundant rRNA sequences
+```{bash}
+tar -xzf precomputed_files.tar.gz mouse1_rRNA.infernalout
+```
+
+# 
+```{bash}
+python 2_Infernal_Filter.py mouse1_mouse_blat.fastq mouse1_rRNA.infernalout mouse1_unique_mRNA.fastq mouse1_unique_rRNA.fastq
+
+```
+
+# Step 6. Rereplication
+After removing contaminants, host sequences, and rRNA, we need to replace the previously removed replicate reads back in our data set.
+```{bash}
+python 3_Reduplicate.py mouse1_qual.fastq mouse1_unique_mRNA.fastq mouse1_unique.fastq.clstr mouse1_mRNA.fastq
+fastqc mouse1_mRNA.fastq
+```
+
+# Step 7. Taxonomic Classification
+
+```{bash}
+# kaiju -t nodes.dmp -f kaiju_db.fmi -i mouse1_mRNA.fastq -z 4 -o mouse1_classification.tsv
+tar --wildcards -xzf precomputed_files.tar.gz kaiju*
+chmod +x kaiju*
+tar -xzf precomputed_files.tar.gz mouse1_classification.tsv nodes.dmp names.dmp
+```
+
+# We can then take the classified reads and perform supplemental analyses. Firstly, we’ll restrict the specificity of the classifications to Genus-level taxa which limits the number of spurious classifications.
+
+```{bash}
+python 4_Constrain_Classification.py genus mouse1_classification.tsv nodes.dmp names.dmp mouse1_classification_genus.tsv
+# 4_Constrain_Classification.py <Minimum_Taxonomic_Rank> <kaiju_Classification> <nodes_file> <names_file> <Output_Classifications>
+```
+
+Then we generate a human readable summary of the classification using Kaiju.
+```{bash}
+./kaijuReport -t nodes.dmp -n names.dmp -i mouse1_classification_genus.tsv -o mouse1_classification_Summary.txt -r genus
+
+```
+
+
+```{bash}
+./kaiju2krona \
+-t nodes.dmp \
+-n names.dmp \
+-i mouse1_classification_genus.tsv \
+-o mouse1_classification_Krona.txt
+
+tar \
+-xzf precomputed_files.tar.gz \
+KronaTools
+
+KronaTools/scripts/ImportText.pl \
+-o mouse1_classification.html mouse1_classification_Krona.txt
+```
+
+# Step 8. Assembling reads
+```{bash}
+/usr/local/bin/spades.py --rna -s mouse1_mRNA.fastq -o mouse1_spades
+mv mouse1_spades/transcripts.fasta mouse1_contigs.fasta
+```
+
+
+```{bash}
+bwa index -a bwtsw mouse1_contigs.fasta
+```
+Next we attempt to map the entire set of putative mRNA reads to this contig database:
+
+```{bash}
+bwa mem -t 4 mouse1_contigs.fasta mouse1_mRNA.fastq > mouse1_contigs.sam
+
+```
+We then extract unmapped reads into a fastq format file for subsequent processing and generate a mapping table in which each contig is associated with the number of reads used to assemble that contig. This table is useful for determining how many reads map to a contig and is used for determining relative expression (see Steps 6 and 8).
+
+```{bash}
+python 5_Contig_Map.py mouse1_mRNA.fastq mouse1_contigs.sam mouse1_unassembled.fastq mouse1_contigs_map.tsv
+# 5_Contig_Map.py <Reads_Used_In_Alignment> <Output_SAM_From_BWA> <Output_File_For_Unassembed_Reads> <Output_File_For_Contig_Map>
+```
+
+# Step 9. Annotate reads to known genes/proteins
+```{bash}
+```
+
+
+```{bash}
+```
+
+
+```{bash}
+```
+
+
+```{bash}
+```
+
+
+```{bash}
+```
+
+
+```{bash}
+```
+
